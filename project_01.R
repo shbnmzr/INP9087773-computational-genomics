@@ -126,39 +126,39 @@ SNP_association_test <- function(SNPdata, indCTRL) {
     # Expected genotype frequencies under HWE
     expected <- c(p^2, 2*p*q, q^2) * sum(observed)
     
-    # Chi-squared statistic
+    # Chi-squared statistic for general model
     chi_sq_general <- sum((observed - expected)^2 / expected)
-    pval_general <- 1 - pchisq(chi_sq_general, df = 1)
+    pval_general <- 1 - pchisq(chi_sq_general, df = 2)
     
     
-    # Recessive model - TODO
+    # Recessive model
     recessive_cases <- sum(cases == "2")
     recessive_controls <- sum(controls == "2")
     total_cases <- length(cases)
     total_controls <- length(controls)
     
-    # Contingency table for the chi-squared test
+    # Contingency table for recessive model
     contingency_table_recessive <- matrix(c(recessive_cases, total_cases - recessive_cases,
                                             recessive_controls, total_controls - recessive_controls),
                                           nrow = 2)
     
-    # Chi-squared statistic
-    chi_sq_recessive <- sum((contingency_table_recessive - expected)^2 / expected)
-    pval_recessive <- 1 - pchisq(chi_sq_recessive, df = 1)
+    # Chi-squared statistic for recessive model
+    chi_sq_recessive <- chisq.test(contingency_table_recessive)$statistic
+    pval_recessive <- chisq.test(contingency_table_recessive)$p.value
     
     
-    # Dominant model - TODO
-    dominant_cases <- sum(cases %in% c("0", "1"))
-    dominant_controls <- sum(controls %in% c("0", "1"))
+    # Dominant model
+    dominant_cases <- sum(cases != "0")
+    dominant_controls <- sum(controls != "0")
     
-    # Contingency table for the chi-squared test
+    # Contingency table for dominant model
     contingency_table_dominant <- matrix(c(dominant_cases, total_cases - dominant_cases,
                                            dominant_controls, total_controls - dominant_controls),
                                          nrow = 2)
     
-    # Chi-squared statistic
-    chi_sq_dominant <- sum((contingency_table_dominant - expected)^2 / expected)
-    pval_dominant <- 1 - pchisq(chi_sq_dominant, df = 1)
+    # Chi-squared statistic for dominant model
+    chi_sq_dominant <- chisq.test(contingency_table_dominant)$statistic
+    pval_dominant <- chisq.test(contingency_table_dominant)$p.value
     
     
     # Store p-values in the matrix
@@ -170,24 +170,25 @@ SNP_association_test <- function(SNPdata, indCTRL) {
   
   # Plot boxplots of p-values
   par(mfrow = c(1, 3)) # Set layout for 3 boxplots in one panel
-  boxplot(p_values_matrix[, "pval_general"], main = "General Model")
-  boxplot(p_values_matrix[, "pval_recessive"], main = "Recessive Model")
-  boxplot(p_values_matrix[, "pval_dominant"], main = "Dominant Model")
+  boxplot(p_values_matrix[, "pval_general"], main = "General Model", ylab = "P-value")
+  boxplot(p_values_matrix[, "pval_recessive"], main = "Recessive Model", ylab = "P-value")
+  boxplot(p_values_matrix[, "pval_dominant"], main = "Dominant Model", ylab = "P-value")
   
   # Return the matrix of p-values
   return(p_values_matrix)
 }
 
+# Debugging steps inside the analyze_SNP_data() function
+
+
+
+# And so on...
 
 
 analyze_SNP_data <- function(SNPfilepath, SNPannotationfilepath, indCTRL, MAFth = 0.01, HWEalpha = 0.01, alpha = 0.05) {
   # Read the SNP data and annotation files
   SNPdata <- read.table(SNPfilepath, header = TRUE, row.names = 1)
   SNPannot <- read.table(SNPannotationfilepath, header = TRUE, sep = "\t", fill = TRUE)
-  
-  # After reading the data
-  print(head(SNPdata))
-  print(head(SNPannot))
   
   # Compute MAF, HWE p-values, and association test p-values
   MAF <- compute_MAF(SNPdata)
@@ -242,12 +243,8 @@ analyze_SNP_data <- function(SNPfilepath, SNPannotationfilepath, indCTRL, MAFth 
 
 
 
-data_file_path = "G:\\unipd\\fourth\\CG\\Group_Project\\Part_1\\SNPdata.txt" # change with your path to data
-annotation_file_path = "G:\\unipd\\fourth\\CG\\Group_Project\\Part_1\\SNPAnnot.txt" # change with your path to annotation
-
-
-SNPdata <- read.table(data_file_path, header = TRUE, row.names = 1)
-SNPannot <- read.table(annotation_file_path, header = TRUE, sep = "\t", fill = TRUE)
+data_file_path = "SNPdata.txt" # change with your path to data
+annotation_file_path = "SNPAnnot.txt" # change with your path to annotation
 
 ## First test (MAFth=0.01, HWEalpha=0.01, alpha = 0.05)
 
