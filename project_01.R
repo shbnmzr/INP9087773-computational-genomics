@@ -178,11 +178,49 @@ SNP_association_test <- function(SNPdata, indCTRL) {
   return(p_values_matrix)
 }
 
-# Debugging steps inside the analyze_SNP_data() function
+# Function to compute q-values using Benjamini-Hochberg procedure
+calculate_q_values <- function(p_values) {
+  n <- length(p_values)
+  
+  # Identify indices of non-NaN p-values
+  non_na_indices <- which(!is.na(p_values))
+  non_na_p_values <- p_values[non_na_indices]
+  
+  m <- length(non_na_p_values)
+  
+  # Order the non-NaN p-values and get the ordered indices
+  p_ordered_indices <- order(non_na_p_values)
+  p_ordered <- non_na_p_values[p_ordered_indices]
+  
+  # Calculate ranks for ordered non-NaN p-values
+  ranks <- 1:m
+  
+  # Initialize q-values for non-NaN p-values
+  q_values <- numeric(m)
+  
+  # Calculate the q-values in the ordered list
+  q_values[m] <- p_ordered[m]
+  for (i in (m-1):1) {
+    q_values[i] <- min(q_values[i + 1], p_ordered[i] * m / ranks[i])
+  }
+  
+  # Ensure q-values are non-decreasing
+  for (i in 2:m) {
+    q_values[i] <- min(q_values[i], q_values[i - 1])
+  }
+  
+  # Reorder q-values to match the original order of non-NaN p-values
+  q_values_final <- numeric(m)
+  q_values_final[p_ordered_indices] <- q_values
+  
+  # Initialize the final q-values vector
+  final_q_values <- rep(NA, n)
+  final_q_values[non_na_indices] <- q_values_final
+  
+  return(final_q_values)
+}
 
 
-
-# And so on...
 
 
 analyze_SNP_data <- function(SNPfilepath, SNPannotationfilepath, indCTRL, MAFth = 0.01, HWEalpha = 0.01, alpha = 0.05) {
@@ -216,7 +254,8 @@ analyze_SNP_data <- function(SNPfilepath, SNPannotationfilepath, indCTRL, MAFth 
   # Perform multiple testing corrections
   sidak <- pval < (1 - (1 - alpha)^(1/length(pval)))
   bonferroni <- pval < (alpha / length(pval))
-  qval <- p.adjust(pval, method = "BH")
+  #qval <- p.adjust(pval, method = "BH")
+  qval <- calculate_q_values(pval)
   
   # Associate each SNP with its gene symbol
   gene_symbols <- SNPannot$Symbol[match(rownames(SNPdata)[filtered_SNPs], SNPannot$Pos)]
@@ -237,10 +276,8 @@ analyze_SNP_data <- function(SNPfilepath, SNPannotationfilepath, indCTRL, MAFth 
   
   # Set row names to SNP IDs
   rownames(results_df) <- rownames(SNPdata)[filtered_SNPs]
-  
   return(results_df)
 }
-
 
 
 data_file_path = "SNPdata.txt" # change with your path to data
