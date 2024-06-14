@@ -1,170 +1,238 @@
-#if (!require("BiocManager", quietly = TRUE))
-#  install.packages("BiocManager")
-#BiocManager::install("ALDEx2")
-#BiocManager::install("ANCOMBC")
-#BiocManager::install("phyloseq")
+###################### 1 #############################
 
-# Load necessary libraries
-library(phyloseq)
-library(zCompositions)
-# Load the compositions package
-library(compositions)
+#Load the data
+#read the raw otu table saved at genus level
+feature_table_gen<-as.matrix(read.table("Genus_otu_table.txt",sep="\t"))
 
-# Imputation using mbImpute
-# Handles zeros in the data by predicting missing values using a Bayesian framework
-#install.packages("devtools")
-#install.packages("glmnet")
-#install.packages("devtools")
-#install.packages("Matrix")
-#library(devtools)
-#install_github("lichen-lab/GMPR")
-#install_github("ruochenj/mbImpute/mbImpute R package", force = TRUE)
-# Load necessary libraries
+# Clr transformation with pseudocounts
+feature_table_gen_pseudo<-feature_table_gen+1
+np<-dim(feature_table_gen_pseudo)[2] #number of samples
+nt<-dim(feature_table_gen_pseudo)[1] #number of taxa
+clrtransform_pseudo<-feature_table_gen_pseudo #just to initialize clrtransform_pseudo
+for (i in (1:np)) {
+  den<-(prod(feature_table_gen_pseudo[,i]))^(1/nt) #geometric mean of column i
+  clrtransform_pseudo[,i]<-log2(feature_table_gen_pseudo[,i]/den) #clr transformation of column i
+}
+head(clrtransform_pseudo)[1:5,1:10]
+
+# Clr transformation without pseudocounts
+np<-dim(feature_table_gen)[2] #number of samples
+nt<-dim(feature_table_gen)[1] #number of taxa
+clrtransform<-feature_table_gen #just to initialize clrtransform
+for (i in (1:np)) {
+  x<-feature_table_gen[,i]
+  x[which(x==0)]<-NA
+  den<-(prod(x,na.rm=TRUE)^(1/length(which(!is.na(x))))) #geometric mean of column i (excluding 0)
+  clrtransform[,i]<-log2(x/den) #clr transformation of column i
+  clrtransform[which(is.na(x)),i]<-0
+}
+head(feature_table_gen)[1:5,1:10]
+head(clrtransform)[1:5,1:10]
+
+#GMPR normalization
 library(GMPR)
+# GMPR expect samples on rows... we need to transpose the count matrix
+GMPR_factors<- GMPR(OTUmatrix = as.data.frame(t(feature_table_gen)), min_ct = 2, intersect_no = 4) #see help for parameters meaning
+feature_table_gen_gmpr<- t(t(feature_table_gen)/GMPR_factors)
+
+GMPR_factors[1:10]
+head(feature_table_gen)[1:5,1:10]
+head(feature_table_gen_gmpr)[1:5,1:10]
+
+#mbImpute (it takes around 8 minutes to run)
+#it takes around 8 minutes to run
 library(mbImpute)
+label_samples<-read.table("metadata_table.txt",sep="\t",header=T)
+# mbImpute expect samples on rows... we need to transpose the count matrix
+imp_count_mats <- mbImpute(condition = label_samples$DiseaseState, otu_tab = t(feature_table_gen), unnormalized = T)
+#mbImpute returns a list three imputed OTU matrices. 
+#imp_count_mat_lognorm: imputed normalized and log transformed matrix. 
+#imp_count_mat_norm : imputed normalized count matrix with
+#library size of each sample equal to 10^6. 
+#imp_count_mat_origlibsize: imputed countmatrix at the original library size.
 
-# Read the raw OTU table saved at genus level
-feature_table_gen <- as.matrix(read.table("Genus_otu_table.txt", sep="\t", header = TRUE, row.names = 1))
+imp_count_mat <-t(imp_count_mats[[3]])
 
-# Read the metadata
-metadata <- read.table("metadata_table.txt", sep="\t", header = TRUE, row.names = 1)
+#load("imp_count_mat_ls.RData")
+#imp_count_mat <-t(imp_count_mat_ls[[3]])
 
-# CLR transformation with pseudocounts
-# Adding a pseudocount to avoid issues with log of zero
-feature_table_gen_pseudo <- feature_table_gen + 1
-# Performing the clr transformation
-clrtransform_pseudo <- apply(feature_table_gen_pseudo, 2, function(x) {
-  log(x / exp(mean(log(x))))
-})
+#print original sparsity and % of imputed data
+tot_zeros<- sum(feature_table_gen==0)
+tot_zeros_imp<- sum(imp_count_mat==0) 
 
-# Optional: GMPR normalization
-# GMPR is robust to zeros and does not assume a constant sum across samples
-# Transpose the matrix so that samples are on rows, as expected by GMPR
-transposed_feature_table <- as.data.frame(t(clrtransform_pseudo))
-# Apply GMPR normalization
-GMPR_factors <- GMPR(OTUmatrix = transposed_feature_table)
-# Normalize the data
-feature_table_gen_gmpr <- t(transposed_feature_table / GMPR_factors)
+paste("Sparsity =", round(tot_zeros/length(feature_table_gen)*100, digits = 1))
+paste("Perc imputed =",round((tot_zeros-tot_zeros_imp)/length(feature_table_gen)*100, digits = 1))
 
-# mbImpute for imputation
-# Handles zeros in the data by predicting missing values using a Bayesian framework
-# mbImpute expects samples on rows... we need to transpose the count matrix
-imp_count_mats <- mbImpute(condition = metadata$DiseaseState, otu_tab = t(feature_table_gen_gmpr), unnormalized = TRUE)
-# mbImpute returns a list of three imputed OTU matrices. 
-# imp_count_mat_lognorm: imputed normalized and log transformed matrix. 
-# imp_count_mat_norm: imputed normalized count matrix with
-# library size of each sample equal to 10^6. 
-# imp_count_mat_origlibsize: imputed count matrix at the original library size.
+#PCA --- objects on rows so to project them on a lower dim space
 
-# Selecting the imputed count matrix at the original library size
-imp_count_mat <- t(imp_count_mats$imp_count_mat_origlibsize)
+PCA<-function(dati,condition){
+  dati<-t(dati) # 
+  N<-dim(dati)[1] #objects
+  M<-dim(dati)[2] #genes (variables)
+  S<-cov(dati)
+  Eig<-eigen(S)
+  lambda<-Eig[[1]] #eigenvalues
+  PCs<-Eig[[2]] #eigenvectors (matrix V)
+  varperc<-rep(0,M)
+  for (i in (1:M)) varperc[i]<-sum(lambda[1:i])/sum(lambda)
+  plot(varperc,type="b")
+  Y<-dati%*%PCs # projection of the N objects in the new coordinates along the M PCs
+  nmc<-names(table(condition))
+  L<-length(nmc)
+  plot(Y[,1],Y[,2]) # in this plot I am showing data in D=2 dim
+  for (i in (2:L)) points(Y[which(condition==nmc[i]),1],Y[which(condition==nmc[i]),2],col=(i+1))
+  #data can be reconstructed
+  #rec_dati<-Y%*%t(PCs)
+  return(list(Y,PCs,lambda))
+}
 
-# Calculate the total number of zeros in the original dataset
-tot_zeros <- sum(feature_table_gen == 0)
+#PCA of raw count data
 
-# Calculate the total number of zeros after imputation
-tot_zeros_imp <- sum(imp_count_mat == 0) 
+resPCA<-PCA(feature_table_gen,condition=label_samples$DiseaseState)
 
-# Calculate and print the sparsity of the original dataset
-sparsity <- round(tot_zeros / length(feature_table_gen) * 100, digits = 1)
-paste("Sparsity =", sparsity, "%")
+#PCA of clr transformed data
 
-# Calculate and print the percentage of data imputed
-perc_imputed <- round((tot_zeros - tot_zeros_imp) / length(feature_table_gen) * 100, digits = 1)
-paste("Percentage imputed =", perc_imputed, "%")
+resPCA<-PCA(clrtransform,condition=label_samples$DiseaseState)
 
-# The choice to use clr transformation and mbImpute without normalization is based on the nature of the data and the goal to maintain the relative abundance information while addressing the issue of zeros in the dataset.
+#PCA of GMPR normalized data
 
-#imp_count_mats <- mbImpute(condition = label_samples$DiseaseState, otu_tab = t(feature_table_gen), unnormalized = T)
+resPCA<-PCA(feature_table_gen_gmpr,condition=label_samples$DiseaseState)
+
+#PCA of mbImpute imputed data
+resPCA<-PCA(imp_count_mat,condition=label_samples$DiseaseState)
+
+#Impute the data and then clr transform to work on Euclidean space
+
+# Clr transformation without pseudocounts on imputed data
+np<-dim(imp_count_mat)[2] #number of samples
+nt<-dim(imp_count_mat)[1] #number of taxa
+impclr_count_mat<-imp_count_mat #just to initialize clrtransform
+for (i in (1:np)) {
+  x<-imp_count_mat[,i]
+  x[which(x==0)]<-NA
+  den<-(prod(x,na.rm=TRUE)^(1/length(which(!is.na(x))))) #geometric mean of column i (excluding 0)
+  impclr_count_mat[,i]<-log2(x/den) #clr transformation of column i
+  impclr_count_mat[which(is.na(x)),i]<-0
+}
+head(imp_count_mat)[1:5,1:10]
+head(impclr_count_mat)[1:5,1:10]
+resPCA<-PCA(impclr_count_mat,condition=label_samples$DiseaseState)
+
+#Save workspace for the next hands-on
+
+save.image("./preprocessing.RData")
 
 ###################### 2 #############################
 
-# Load necessary libraries
 
+# Load necessary libraries for DA analysis
 library(ALDEx2)
 library(ANCOMBC)
+library(phyloseq)
 
-# Assuming genus_otu_imputed and metadata are already loaded from Exercise 1
+# Assuming imp_count_mat and label_samples are already loaded from Exercise 1
+
 
 # Differential abundance analysis using Aldex2
-# Aldex2 uses a Monte Carlo sampling technique to determine differences in abundance
-aldex_results <- aldex(genus_otu_imputed, metadata$Condition, mc.samples = 128, denom = "all")
+aldex.clr <- aldex.clr(imp_count_mat, label_samples$DiseaseState, mc.samples = 128, denom = "all")
+aldex.effect <- aldex.effect(aldex.clr)
+aldex.significant <- aldex.ttest(aldex.clr)
 
-# Extracting differentially abundant taxa
-aldex_signif <- aldex_results$we.eBH < 0.05
+# Set the row names of imp_count_mat to match the IDs in label_samples
+#flipped_imp_count_mat <- data.frame(t(imp_count_mat))
+#rownames(imp_count_mat) <- label_samples$ID
 
-# Differential abundance analysis using Ancom
-# Ancom assumes a log-normal distribution of the data
-ancom_results <- ancom(phyloseq_object, "Condition")
+# Create the OTU table for phyloseq
+OTU <- otu_table(imp_count_mat, taxa_are_rows = TRUE)
 
-# Extracting differentially abundant taxa
-ancom_signif <- ancom_results$significance
+# Create the sample data for phyloseq
+sample_data <- sample_data(label_samples)
 
-# Compare the results
-# Identify common and unique taxa
-common_taxa <- intersect(names(aldex_signif), names(ancom_signif))
-unique_aldex <- setdiff(names(aldex_signif), names(ancom_signif))
-unique_ancom <- setdiff(names(ancom_signif), names(aldex_signif))
+# Ensure that the sample names in the OTU table match the row names of the sample data
+sample_names(OTU) <- rownames(sample_data)
 
-# Commenting on the results
-# Number of DA taxa reported by each method and the common ones
-num_aldex_da <- sum(aldex_signif)
-num_ancom_da <- sum(ancom_signif)
-num_common_da <- length(common_taxa)
+# Now create the phyloseq object
+physeq <- phyloseq(OTU, sample_data)
 
-# Properties/trends/characteristics of common taxa
-# This requires further biological interpretation based on the taxa identified
+# Check if the phyloseq object is valid
+physeq
+
+# Run ANCOMBC2 for differential abundance analysis
+ancombc2_res <- ancombc2(
+  data = physeq,
+  assay_name = "counts",
+  tax_level = NULL, # Use NULL if you want to use the taxonomic level in the phyloseq object
+  fix_formula = "DiseaseState", # Replace with the actual fixed effects formula
+  rand_formula = NULL, # Use NULL if there are no random effects
+  p_adj_method = "holm", # Choose an appropriate p-value adjustment method
+  pseudo_sens = TRUE, # Set to TRUE to add a pseudocount for sensitivity
+  prv_cut = 0.10, # Prevalence cut-off
+  lib_cut = 1000, # Library size cut-off
+  s0_perc = 0.05, # Threshold for the proportion of zero counts
+  group = "DiseaseState", # Replace with the actual grouping variable
+  struc_zero = FALSE, # Set to TRUE if structural zeros are expected
+  neg_lb = FALSE, # Set to TRUE if negative binomial distribution is expected
+  alpha = 0.05, # Significance level
+  n_cl = 2, # Number of clusters for W-statistic calculation
+  verbose = TRUE, # Set to TRUE for detailed output
+  global = FALSE, # Set to TRUE for global test
+  pairwise = TRUE, # Set to TRUE for pairwise comparisons
+  dunnet = FALSE, # Set to TRUE for Dunnett's test
+  trend = FALSE, # Set to TRUE for trend test
+  iter_control = list(tol = 1e-5, max_iter = 20, verbose = FALSE), # Iteration control for EM algorithm
+  em_control = list(tol = 1e-5, max_iter = 100), # EM algorithm control
+  lme_control = NULL, # Linear mixed-effects model control
+  mdfdr_control = list(fwer_ctrl_method = "holm", B = 100), # Multiple testing control
+  trend_control = NULL # Trend test control
+)
+
+# View the results
+ancombc2_res
+
+
+# Compare the results of the two methods
+# Extracting significant features from both methods
+aldex.sig.features <- rownames(aldex.clr)[aldex.significant$adj.P.Val < 0.05]
+ancombc2_res.sig.features <- rownames(ancombc2_res$res)[ancombc2_res$res$`p_(Intercept)` < 0.05]
+
+# Identifying common features found by both methods
+common.features <- intersect(aldex.sig.features, ancom.sig.features)
 
 # Output the results
 list(
-  num_aldex_da = num_aldex_da,
-  num_ancom_da = num_ancom_da,
-  num_common_da = num_common_da,
-  common_taxa = common_taxa,
-  unique_aldex = unique_aldex,
-  unique_ancom = unique_ancom
+  aldex_sig_features = aldex.sig.features,
+  ancom_sig_features = ancom.sig.features,
+  common_features = common.features
 )
 
-
-#################### 3 #########################
-
-# Load necessary libraries
+###################### 3 #############################
+# Load necessary libraries for dimensionality reduction
 library(vegan)
 library(Rtsne)
-library(umap)
+library(uwot)
 
-# Assuming genus_otu_imputed, metadata, and DA taxa are already loaded from previous exercises
+# Assuming imp_count_mat and label_samples are already loaded from Exercise 1
+
+# Select DA taxa based on the results from Exercise 2
+selected_taxa <- common.features
 
 # Subset the data to include only DA taxa
-genus_otu_da <- genus_otu_imputed[, DA_taxa]
+da_taxa_data <- imp_count_mat[selected_taxa, ]
 
-# NMDS using the entire dataset
-nmds_full <- metaMDS(genus_otu_imputed)
-# NMDS using only DA taxa
-nmds_da <- metaMDS(genus_otu_da)
+# NMDS using the DA taxa
+nmds.da <- metaMDS(da_taxa_data)
 
-# t-SNE using the entire dataset
-tsne_full <- Rtsne(as.matrix(genus_otu_imputed))
-# t-SNE using only DA taxa
-tsne_da <- Rtsne(as.matrix(genus_otu_da))
+# t-SNE using the DA taxa
+tsne.da <- Rtsne(as.matrix(da_taxa_data))
 
-# UMAP using the entire dataset
-umap_full <- umap(as.matrix(genus_otu_imputed))
-# UMAP using only DA taxa
-umap_da <- umap(as.matrix(genus_otu_da))
+# UMAP using the DA taxa
+umap.da <- umap(as.matrix(da_taxa_data))
 
 # Plotting the results
-par(mfrow=c(2,3))
-plot(nmds_full, main="NMDS Full Dataset")
-plot(nmds_da, main="NMDS DA Taxa")
-plot(tsne_full$Y, main="t-SNE Full Dataset")
-plot(tsne_da$Y, main="t-SNE DA Taxa")
-plot(umap_full$layout, main="UMAP Full Dataset")
-plot(umap_da$layout, main="UMAP DA Taxa")
+par(mfrow = c(1, 3))
+plot(nmds.da, main = "NMDS on DA Taxa")
+plot(tsne.da$Y, main = "t-SNE on DA Taxa")
+plot(umap.da$layout, main = "UMAP on DA Taxa")
 
-# Commenting on the results
-# Compare the plots visually and statistically (if applicable)
-# Look for clustering patterns, overlap between groups, and separation of healthy donors and CDI patients
-
-# Output the results
-# Include any observations about trends or differences between the full dataset and the DA taxa
+# Compare the plots with those obtained using all taxa
+# You can run NMDS, t-SNE, and UMAP on the full dataset and compare visually
