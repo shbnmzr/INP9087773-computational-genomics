@@ -137,6 +137,33 @@ library(phyloseq)
 aldex.clr <- aldex.clr(imp_count_mat, label_samples$DiseaseState, mc.samples = 128, denom = "all")
 aldex.effect <- aldex.effect(aldex.clr)
 aldex.significant <- aldex.ttest(aldex.clr)
+aldex.kw <- aldex.kw(aldex.clr)
+
+
+# ♢
+# rab.all - median clr value for all samples in the feature
+# ♢
+# rab.win.NS - median clr value for the NS group of samples
+# ♢
+# rab.win.S - median clr value for the S group of samples
+# ♢
+# rab.X1_BNS.q50 - median expression value of features in sample X1_BNS if include.item.summary=TRUE
+# ♢
+# dif.btw - median difference in clr values between S and NS groups
+# ♢
+# dif.win - median of the largest difference in clr values within S and NS groups
+# ♢
+# effect - median effect size: diff.btw / max(diff.win) for all instances
+# ♢
+# overlap - proportion of effect size distribution that overlaps 0 (i.e. no effect)
+# ∗
+# we.ep - Expected p-value of Welch’s t-test, a posterior predictive p-value
+# ∗
+# we.eBH - Expected Benjamini-Hochberg corrected p-value of Welch’s t test
+# ∗
+# wi.ep - Expected p-value of Wilcoxon rank test
+# ∗
+# wi.eBH - Expected Benjamini-Hochberg corrected p-value of Wilcoxon test
 
 # Set the row names of imp_count_mat to match the IDs in label_samples
 #flipped_imp_count_mat <- data.frame(t(imp_count_mat))
@@ -189,19 +216,37 @@ ancombc2_res <- ancombc2(
 # View the results
 ancombc2_res
 
+# merge into one output for convenience
+aldex.all <- data.frame(aldex.significant,aldex.effect)
+
+par(mfrow=c(1,3))
+aldex.plot(aldex.all, type="MA", test="welch", main='MA plot')
+aldex.plot(aldex.all, type="MW", test="welch", main='effect plot')
+aldex.plot(aldex.all, type="volcano", test="welch", main='volcano plot')
+
+
+# The left panel is the MA plot, the right is the MW (effect) plot. 
+# In both plots red represents features called as differentially abundant with q <0.05; 
+# grey are abundant, but not differentially abundant; black are rare, but not differentially abundant. 
+# This function uses the combined output from the aldex.ttest and aldex.effect functions above
+
+
 
 # Compare the results of the two methods
 # Extracting significant features from both methods
-aldex.sig.features <- rownames(aldex.clr)[aldex.significant$adj.P.Val < 0.05]
+aldex.sig.features <- rownames(aldex.significant)[aldex.significant$we.ep < 0.05]
 ancombc2_res.sig.features <- rownames(ancombc2_res$res)[ancombc2_res$res$`p_(Intercept)` < 0.05]
 
+# Remove "tax_" prefix
+ancombc2_res.sig.features <- paste("tax_", ancombc2_res.sig.features, sep="")
+
 # Identifying common features found by both methods
-common.features <- intersect(aldex.sig.features, ancom.sig.features)
+common.features <- intersect(aldex.sig.features, ancombc2_res.sig.features)
 
 # Output the results
 list(
   aldex_sig_features = aldex.sig.features,
-  ancom_sig_features = ancom.sig.features,
+  ancom_sig_features = ancombc2_res.sig.features,
   common_features = common.features
 )
 
