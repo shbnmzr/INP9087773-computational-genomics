@@ -235,10 +235,8 @@ aldex.plot(aldex.all, type="volcano", test="welch", main='volcano plot')
 # Compare the results of the two methods
 # Extracting significant features from both methods
 aldex.sig.features <- rownames(aldex.significant)[aldex.significant$we.ep < 0.05]
-ancombc2_res.sig.features <- rownames(ancombc2_res$res)[ancombc2_res$res$`p_(Intercept)` < 0.05]
-
-# Remove "tax_" prefix
-ancombc2_res.sig.features <- paste("tax_", ancombc2_res.sig.features, sep="")
+ancombc2_res.sig.rownames <- rownames(ancombc2_res$res)[ancombc2_res$res$`p_(Intercept)` < 0.05]
+ancombc2_res.sig.features <- ancombc2_res$res$taxon[ancombc2_res$res$`p_(Intercept)` < 0.05]
 
 # Identifying common features found by both methods
 common.features <- intersect(aldex.sig.features, ancombc2_res.sig.features)
@@ -267,8 +265,15 @@ da_taxa_data <- imp_count_mat[selected_taxa, ]
 # NMDS using the DA taxa
 nmds.da <- metaMDS(da_taxa_data)
 
-# t-SNE using the DA taxa
-tsne.da <- Rtsne(as.matrix(da_taxa_data))
+# Check the number of samples in your dataset
+num_samples <- ncol(da_taxa_data)
+
+# Set the perplexity to a value smaller than the number of samples
+# A common practice is to set perplexity to a value between 5 and 50
+#perplexity_value <- min(floor(num_samples / 2), 30) # Example adjustment
+
+# Run t-SNE with the adjusted perplexity value - this is the most number I get
+tsne.da <- Rtsne(as.matrix(da_taxa_data), perplexity = 14)
 
 # UMAP using the DA taxa
 umap.da <- umap(as.matrix(da_taxa_data))
@@ -277,7 +282,29 @@ umap.da <- umap(as.matrix(da_taxa_data))
 par(mfrow = c(1, 3))
 plot(nmds.da, main = "NMDS on DA Taxa")
 plot(tsne.da$Y, main = "t-SNE on DA Taxa")
-plot(umap.da$layout, main = "UMAP on DA Taxa")
+plot(umap.da, main = "UMAP on DA Taxa")
 
-# Compare the plots with those obtained using all taxa
-# You can run NMDS, t-SNE, and UMAP on the full dataset and compare visually
+
+# # Doing same procedure with all texa
+
+# NMDS using the all taxa
+nmds.all <- metaMDS(imp_count_mat)
+
+# Check the number of samples in your dataset
+num_samples <- ncol(imp_count_mat)
+
+# Set the perplexity to a value smaller than the number of samples
+# A common practice is to set perplexity to a value between 5 and 50
+perplexity_value <- min(floor(num_samples / 2), 30) # Example adjustment
+
+# Run t-SNE with the adjusted perplexity value
+tsne.all <- Rtsne(as.matrix(imp_count_mat), perplexity = perplexity_value)
+
+# UMAP using the All taxa
+umap.all <- umap(as.matrix(imp_count_mat))
+
+# Plotting the results
+par(mfrow = c(1, 3))
+plot(nmds.all, main = "NMDS on All Taxa")
+plot(tsne.all$Y, main = "t-SNE on All Taxa")
+plot(umap.all, main = "UMAP on All Taxa")
